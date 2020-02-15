@@ -33,8 +33,19 @@ def _jvm_import_impl(ctx):
             "chmod +w {output_jar}".format(output_jar = outjar.path),
             # If the jar is signed do not modify the manifest because it will
             # make the signature invalid. Otherwise append the Target-Label
-            # manifest attribute using `jar umf`
-            "(unzip -l {output_jar} | grep -qE 'META-INF/.*\\.SF') || ({jar} umf {manifest_update_file} {output_jar} > /dev/null 2>&1 || true)".format(
+            # manifest attribute using `jar umf`.  Since that will update the
+            # timestamp of the JAR entry to 'now' and result in a different 
+            # hash (thereby making everything downstream uncacheable), take
+            # special care to make sure we're reproducible.
+            # NB: On some systems zip will not properly take file timestamps
+            # when updating existing entries; that's why we use jar.
+            # Based on a pull request submitted by kevingessner, edited to work
+            # on macOS.
+            "(unzip -l {output_jar} | grep -qE 'META-INF/.*\\.SF') || \
+                ({jar} xf {manifest_update_file} {output_jar} > /dev/null 2>&1 && \
+                {jar} -q {output_jar} META-INF/MANIFEST.MF && \
+                touch -t 201001010000.00 META-INF/MANIFEST.MF && \
+                {jar} uf {output_jar} META-INF/MANIFEST.MF || true)".format(
                 jar = "%s/bin/jar" % ctx.attr._host_javabase[java_common.JavaRuntimeInfo].java_home,
                 manifest_update_file = manifest_update_file.path,
                 output_jar = outjar.path,
